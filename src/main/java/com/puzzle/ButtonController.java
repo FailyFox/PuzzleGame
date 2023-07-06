@@ -25,7 +25,6 @@ public class ButtonController {
     public Label label;
     @FXML
     public ImageView imageView;
-    PuzzleImageTransfer puzzleImage = PuzzleImageTransfer.getInstance();
 
     @FXML
     private void splitButtonClick() throws IOException {
@@ -46,7 +45,6 @@ public class ButtonController {
     }
     @FXML
     private void letsAssembleButtonClick() throws IOException {
-        puzzleImage.setPuzzleImage(imageView);
         File folder = new File("src/main/resources/part/");
         File[] files = folder.listFiles();
         if (files != null && files.length == PARTS) {

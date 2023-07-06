@@ -19,7 +19,9 @@ public class PuzzleApplication extends Application {
         stage.setResizable(false);
         stage.show();
     }
-
+    static {
+        nu.pattern.OpenCV.loadLocally();
+    }
     public static void main(String[] args) {
         launch();
     }

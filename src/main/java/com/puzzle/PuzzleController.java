@@ -6,9 +6,11 @@ import javafx.scene.control.Label;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.MouseEvent;
+import org.opencv.core.*;
+import org.opencv.imgproc.Imgproc;
 
-import java.awt.Color;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
 
 public class PuzzleController {
     @FXML
@@ -17,9 +19,7 @@ public class PuzzleController {
     private ImageView puzzle8, puzzle9, puzzle10, puzzle11, puzzle12, puzzle13, puzzle14, puzzle15;
     @FXML
     private Label label;
-    private final PuzzleImageTransfer puzzleImage = PuzzleImageTransfer.getInstance();
-    private final BufferedImage[] splittedImage = ButtonController.splitImage(puzzleImage.getPuzzleImage());
-    private static ImageView[] puzzle;
+    private static ImageView[][] puzzle;
     private ImageView draggedImageView;
     private double initialImageX;
     private double initialImageY;
@@ -28,8 +28,10 @@ public class PuzzleController {
 
     @FXML
     private void initialize() {
-        puzzle = new ImageView[] { puzzle0, puzzle1, puzzle2, puzzle3, puzzle4, puzzle5, puzzle6, puzzle7,
-                puzzle8, puzzle9, puzzle10, puzzle11, puzzle12, puzzle13, puzzle14, puzzle15 };
+        puzzle = new ImageView[][] { { puzzle0, puzzle1, puzzle2, puzzle3 },
+                                     { puzzle4, puzzle5, puzzle6, puzzle7 },
+                                     { puzzle8, puzzle9, puzzle10, puzzle11 },
+                                     { puzzle12, puzzle13, puzzle14, puzzle15 } };
     }
     @FXML
     private void onMousePressed(MouseEvent event) {
@@ -52,12 +54,16 @@ public class PuzzleController {
     @FXML
     private void onMouseReleased(MouseEvent event) {
         boolean isSwapped = false;
-        for (ImageView imageView : puzzle) {
-            if (draggedImageView != imageView && isOverlapping(event, imageView)) {
-                swapImages(draggedImageView, imageView);
-                isSwapped = true;
-                if (isPuzzleCorrect()) {
-                    label.setText("Puzzle is correct");
+        for (ImageView[] imageViews : puzzle) {
+            for (ImageView imageView : imageViews) {
+                if (draggedImageView != imageView && isOverlapping(event, imageView)) {
+                    swapImages(draggedImageView, imageView);
+                    isSwapped = true;
+                    if (isPuzzleCorrect()) {
+                        label.setText("Puzzle is correct");
+                    } else {
+                        label.setText("");
+                    }
                 }
             }
         }
@@ -94,26 +100,116 @@ public class PuzzleController {
     }
     @FXML
     private void autoAssemble() {
-        double puzzlePieceX = puzzle0.getLayoutX();
-        double puzzlePieceY = puzzle0.getLayoutY();
-        for (ImageView puzzlePiece : puzzle) {
-            puzzlePiece.setRotate(0);
-        }
-        for (int i = 0; i < puzzle.length - 1; i++) {
-            if (isPieceCorrect(puzzle[i], splittedImage[i])) {
-                continue;
+        for (ImageView[] imageView : puzzle) {
+            for (ImageView puzzlePiece : imageView) {
+                puzzlePiece.setRotate(0);
             }
-            for (int j = i + 1; j < puzzle.length; j++) {
-                swapImages(puzzle[i], puzzle[j]);
-                if (!isPieceCorrect(puzzle[i], splittedImage[i])) {
-                    swapImages(puzzle[i], puzzle[j]);
+        }
+
+        for (int i = 0; i < puzzle.length; i++) {
+            solveRow(i);
+        }
+        while (!isVerticallyCompared()) {
+            replaceRows();
+        }
+
+        if (isPuzzleCorrect()) {
+            label.setText("Puzzle is correct");
+        } else {
+            label.setText("");
+        }
+    }
+    private void solveRow(int row) {
+        for (int column = 0; column < puzzle[row].length - 1; column++) {
+            ImageView currentPiece = puzzle[row][column];
+            ImageView targetPiece;
+            int bestMatchRow = -1;
+            int bestMatchColumn = -1;
+            double bestComplementIndex = Double.MAX_VALUE;
+            for (int i = row; i < puzzle.length; i++) {
+                for (int j = 0; j < puzzle[i].length; j++) {
+                    targetPiece = puzzle[i][j];
+                    if (currentPiece.equals(targetPiece)) {
+                        continue;
+                    }
+                    Mat image1 = imageToMat(currentPiece.getImage());
+                    Mat image2 = imageToMat(targetPiece.getImage());
+                    Rect region1 = new Rect(image1.width() - 10, 0, 10, image1.height());
+                    Rect region2 = new Rect(0, 0, 10, image2.height());
+
+                    if (isImagesComplementsHorizontally(image1, image2, region1, region2)) {
+                        double complementIndex = imageComplementIndex(image1, image2, region1, region2);
+                        if (complementIndex < bestComplementIndex) {
+                            bestMatchRow = i;
+                            bestMatchColumn = j;
+                            bestComplementIndex = complementIndex;
+                        }
+                    }
+                }
+            }
+            if (bestMatchRow != -1 || bestMatchColumn != -1) {
+                targetPiece = puzzle[bestMatchRow][bestMatchColumn];
+                swapImages(puzzle[row][column + 1], targetPiece);
+            }
+        }
+
+        if (isRowCorrect(row)) {
+            label.setText("Row correct");
+        } else {
+            fixRow(row);
+        }
+    }
+    private void fixRow(int row) {
+        int bestMatchRow = -1;
+        int bestMatchColumn = -1;
+        double bestComplementIndex = Double.MAX_VALUE;
+        ImageView currentPiece = puzzle[row][0];
+        ImageView targetPiece;
+        Mat image2 = imageToMat(currentPiece.getImage());
+        Rect region2 = new Rect(0, 0, 10, image2.height());
+        for (int i = row; i < puzzle.length; i++) {
+            for (int j = 0; j < puzzle[i].length; j++) {
+                targetPiece = puzzle[i][j];
+
+                Mat image1 = imageToMat(targetPiece.getImage());
+                Rect region1 = new Rect(image1.width() - 10, 0, 10, image1.height());
+
+                if (isImagesComplementsHorizontally(image1, image2, region1, region2)) {
+                    double complementIndex = imageComplementIndex(image1, image2, region1, region2);
+                    if (complementIndex < bestComplementIndex) {
+                        bestMatchRow = i;
+                        bestMatchColumn = j;
+                        bestComplementIndex = complementIndex;
+                    }
                 }
             }
         }
-        puzzle0.setLayoutX(puzzlePieceX);
-        puzzle0.setLayoutY(puzzlePieceY);
-        if (isPuzzleCorrect()) {
-            label.setText("Puzzle is correct");
+        targetPiece = puzzle[bestMatchRow][bestMatchColumn];
+        swapImages(currentPiece, targetPiece);
+        solveRow(row);
+    }
+    private void replaceRows() {
+        Mat image1 = imageToMat(puzzle[0][0].getImage());
+        Rect region1 = new Rect(0, image1.height() - 10, image1.width(), 10);
+        for (int i = 1; i < puzzle[0].length; i++) {
+            Mat image2 = imageToMat(puzzle[i][0].getImage());
+            Rect region2 = new Rect(0, 0, image1.width(), 10);
+
+            if (isImagesComplementsVertically(image1, image2, region1, region2)) {
+                if (i == 1) {
+                    for (int column = 0; column < puzzle[0].length; column++) {
+                        swapImages(puzzle[i + 1][column], puzzle[i + 2][column]);
+                    }
+                    return;
+                }
+                for (int column = 0; column < puzzle[0].length; column++) {
+                    swapImages(puzzle[0][column], puzzle[i - 1][column]);
+                }
+                return;
+            }
+        }
+        for (int column = 0; column < puzzle[0].length; column++) {
+            swapImages(puzzle[0][column], puzzle[puzzle[0].length - 1][column]);
         }
     }
     private void swapImages(ImageView imageView1, ImageView imageView2) {
@@ -158,62 +254,119 @@ public class PuzzleController {
                 && mouseY < overlappedImageY + overlappedImageHeight);
     }
     private boolean isPuzzleCorrect() {
-        for (int i = 0; i < puzzle.length; i++) {
-            BufferedImage img1 = SwingFXUtils.fromFXImage(puzzle[i].getImage(), null);
-            int h1 = img1.getHeight();
-            int w1 = img1.getWidth();
-            long diff = 0;
-            for (int j = 0; j < h1; j++) {
-                for (int k = 0; k < w1; k++) {
-                    //Getting the RGB values of a pixel
-                    int pixel1 = img1.getRGB(k, j);
-                    Color color1 = new Color(pixel1, true);
-                    int r1 = color1.getRed();
-                    int g1 = color1.getGreen();
-                    int b1 = color1.getBlue();
-                    int pixel2 = splittedImage[i].getRGB(k, j);
-                    Color color2 = new Color(pixel2, true);
-                    int r2 = color2.getRed();
-                    int g2 = color2.getGreen();
-                    int b2 = color2.getBlue();
-                    //sum of differences of RGB values of the two images
-                    long data = Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
-                    diff = diff + data;
+        return (isHorizontallyCompared() && isVerticallyCompared());
+    }
+    private boolean isRowCorrect(int row) {
+        boolean correct = false;
+        for (int j = 0; j < puzzle[row].length-1; j++) {
+            Mat image1 = imageToMat(puzzle[row][j].getImage());
+            Mat image2 = imageToMat(puzzle[row][j + 1].getImage());
+
+            Rect region1 = new Rect(image1.width() - 10, 0, 10, image1.height());
+            Rect region2 = new Rect(0, 0, 10, image2.height());
+
+            if (isImagesComplements(image1, image2, region1, region2)) {
+                correct = true;
+            } else {
+                correct = false;
+                break;
+            }
+        }
+        return correct;
+    }
+    private boolean isHorizontallyCompared() {
+        boolean correct = false;
+        for (ImageView[] imageViews : puzzle) {
+            for (int j = 0; j < imageViews.length - 1; j++) {
+                Mat image1 = imageToMat(imageViews[j].getImage());
+                Mat image2 = imageToMat(imageViews[j + 1].getImage());
+
+                Rect region1 = new Rect(image1.width() - 10, 0, 10, image1.height());
+                Rect region2 = new Rect(0, 0, 10, image2.height());
+
+                if (isImagesComplements(image1, image2, region1, region2)) {
+                    correct = true;
+                } else {
+                    correct = false;
+                    break;
                 }
             }
-            double avg = (double) diff /(w1 * h1 * 3);
-            double percentage = (avg / 255) * 100;
-            if (percentage > 2) {
-                return false;
+            if (!correct) {
+                break;
             }
         }
-        return true;
+        return correct;
     }
-    private boolean isPieceCorrect(ImageView imageView, BufferedImage correctPiece) {
-        BufferedImage img1 = SwingFXUtils.fromFXImage(imageView.getImage(), null);
-        int h1 = img1.getHeight();
-        int w1 = img1.getWidth();
-        long diff = 0;
-        for (int j = 0; j < h1; j++) {
-            for (int k = 0; k < w1; k++) {
-                //Getting the RGB values of a pixel
-                int pixel1 = img1.getRGB(k, j);
-                Color color1 = new Color(pixel1, true);
-                int r1 = color1.getRed();
-                int g1 = color1.getGreen();
-                int b1 = color1.getBlue();
-                int pixel2 = correctPiece.getRGB(k, j);
-                Color color2 = new Color(pixel2, true);
-                int r2 = color2.getRed();
-                int g2 = color2.getGreen();
-                int b2 = color2.getBlue();
-                //sum of differences of RGB values of the two images
-                long data = Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
-                diff = diff + data;
+    private boolean isVerticallyCompared() {
+        boolean correct = false;
+        for (int i = 0; i < puzzle.length - 1; i++) {
+            for (int j = 0; j < puzzle[i].length; j++) {
+                Mat image1 = imageToMat(puzzle[i][j].getImage());
+                Mat image2 = imageToMat(puzzle[i + 1][j].getImage());
+
+                Rect region1 = new Rect(0, image1.height() - 10, image1.width(), 10);
+                Rect region2 = new Rect(0, 0, image1.width(), 10);
+
+                if (isImagesComplements(image1, image2, region1, region2)) {
+                    correct = true;
+                } else {
+                    correct = false;
+                    break;
+                }
+            }
+            if (!correct) {
+                break;
             }
         }
-        double avg = (double) diff /(w1*h1*3);
-        double percentage = (avg/255)*100;
-        return !(percentage > 2);
+        return correct;
+    }
+    private double imageComplementIndex(Mat image1, Mat image2, Rect region1, Rect region2) {
+        Mat subImage1 = image1.submat(region1);
+        Mat subImage2 = image2.submat(region2);
+
+        Mat diff = new Mat();
+        Core.absdiff(subImage1, subImage2, diff);
+
+        Imgproc.cvtColor(diff, diff, Imgproc.COLOR_BGR2GRAY);
+
+        Imgproc.threshold(diff, diff, 1, 255, Imgproc.THRESH_BINARY);
+
+        Scalar diffSum = Core.sumElems(diff);
+        return diffSum.val[0];
+    }
+    private boolean isImagesComplements(Mat image1, Mat image2, Rect region1, Rect region2) {
+        double complementIndex = imageComplementIndex(image1, image2, region1, region2);
+        int horizontalThreshold = 629340;
+        int verticalThresholdMin = 739755;
+        int verticalThresholdMax = 944265;
+        return (complementIndex <= horizontalThreshold
+                || (complementIndex >= verticalThresholdMin && complementIndex <= verticalThresholdMax))
+                && complementIndex != 622710;
+    }
+    private boolean isImagesComplementsHorizontally(Mat image1, Mat image2, Rect region1, Rect region2) {
+        double complementIndex = imageComplementIndex(image1, image2, region1, region2);
+        int horizontalThreshold = 629340;
+        return complementIndex <= horizontalThreshold && complementIndex != 622710;
+    }
+    private boolean isImagesComplementsVertically(Mat image1, Mat image2, Rect region1, Rect region2) {
+        double complementIndex = imageComplementIndex(image1, image2, region1, region2);
+        int verticalThresholdMin = 739755;
+        int verticalThresholdMax = 944265;
+        return (complementIndex >= verticalThresholdMin && complementIndex <= verticalThresholdMax)
+                && complementIndex != 869550;
+    }
+    private Mat imageToMat(Image image) {
+        BufferedImage bufferedImage = SwingFXUtils.fromFXImage(image, null);
+        bufferedImage = convertTo3ByteBGRType(bufferedImage);
+        Mat mat = new Mat(bufferedImage.getHeight(), bufferedImage.getWidth(), CvType.CV_8UC3);
+        byte[] data = ((DataBufferByte) bufferedImage.getRaster().getDataBuffer()).getData();
+        mat.put(0, 0, data);
+        return mat;
+    }
+    private BufferedImage convertTo3ByteBGRType(BufferedImage image) {
+        BufferedImage convertedImage = new BufferedImage(image.getWidth(), image.getHeight(),
+                BufferedImage.TYPE_3BYTE_BGR);
+        convertedImage.getGraphics().drawImage(image, 0, 0, null);
+        return convertedImage;
     }
 }
